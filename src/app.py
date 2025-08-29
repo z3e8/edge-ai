@@ -21,31 +21,36 @@ def hello():
 
 @app.route('/infer', methods=['POST'])
 def infer():
-    # get base64 image from request
-    data = request.get_json()
-    img_b64 = data.get('image')
+    try:
+        # get base64 image from request
+        data = request.get_json()
+        img_b64 = data.get('image')
+        
+        # decode base64 to image
+        img_bytes = base64.b64decode(img_b64)
+        image = Image.open(io.BytesIO(img_bytes))
+        
+        # preprocess
+        img_array = preprocess_image(image)
+        
+        # run inference
+        model = get_model()
+        predictions = model.predict(img_array)
+        
+        # decode top 5 predictions
+        decoded = decode_predictions(predictions, top=5)[0]
+        
+        # format results
+        results = [
+            {"class": label, "confidence": float(score)}
+            for (_, label, score) in decoded
+        ]
+        
+        return jsonify({"predictions": results})
     
-    # decode base64 to image
-    img_bytes = base64.b64decode(img_b64)
-    image = Image.open(io.BytesIO(img_bytes))
-    
-    # preprocess
-    img_array = preprocess_image(image)
-    
-    # run inference
-    model = get_model()
-    predictions = model.predict(img_array)
-    
-    # decode top 5 predictions
-    decoded = decode_predictions(predictions, top=5)[0]
-    
-    # format results
-    results = [
-        {"class": label, "confidence": float(score)}
-        for (_, label, score) in decoded
-    ]
-    
-    return jsonify({"predictions": results})
+    except Exception as e:
+        # handle invalid image format or decoding errors
+        return jsonify({"error": f"invalid image format: {str(e)}"}), 400
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
