@@ -38,6 +38,10 @@ def infer():
         img_bytes = base64.b64decode(img_b64)
         image = Image.open(io.BytesIO(img_bytes))
         
+        # check if queue is full
+        if request_queue.full():
+            return jsonify({"error": "service overloaded, queue full"}), 503
+        
         # put request in queue (for now, still process synchronously)
         # will add worker thread in next commit
         request_queue.put(image, block=False)
@@ -62,6 +66,10 @@ def infer():
         ]
         
         return jsonify({"predictions": results})
+    
+    except queue.Full:
+        # queue became full between check and put
+        return jsonify({"error": "service overloaded, queue full"}), 503
     
     except Exception as e:
         # handle invalid image format or decoding errors
