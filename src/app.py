@@ -1,5 +1,7 @@
 import base64
 import io
+import os
+import queue
 from flask import Flask, jsonify, request
 from PIL import Image
 from model import load_model, get_model
@@ -7,6 +9,12 @@ from preprocessing import preprocess_image
 from tensorflow.keras.applications.mobilenet_v2 import decode_predictions
 
 app = Flask(__name__)
+
+# config from env vars
+QUEUE_SIZE = int(os.getenv('QUEUE_SIZE', 10))
+
+# create request queue
+request_queue = queue.Queue(maxsize=QUEUE_SIZE)
 
 # load model at startup
 try:
@@ -30,8 +38,15 @@ def infer():
         img_bytes = base64.b64decode(img_b64)
         image = Image.open(io.BytesIO(img_bytes))
         
+        # put request in queue (for now, still process synchronously)
+        # will add worker thread in next commit
+        request_queue.put(image, block=False)
+        
+        # process from queue
+        img_to_process = request_queue.get()
+        
         # preprocess
-        img_array = preprocess_image(image)
+        img_array = preprocess_image(img_to_process)
         
         # run inference
         model = get_model()
