@@ -2,6 +2,8 @@ import base64
 import io
 import os
 import queue
+import threading
+import time
 from flask import Flask, jsonify, request
 from PIL import Image
 from model import load_model, get_model
@@ -16,12 +18,53 @@ QUEUE_SIZE = int(os.getenv('QUEUE_SIZE', 10))
 # create request queue
 request_queue = queue.Queue(maxsize=QUEUE_SIZE)
 
+# dict to store results {request_id: result}
+results = {}
+
 # load model at startup
 try:
     load_model()
 except Exception as e:
     print(f"error loading model, exiting: {e}")
     exit(1)
+
+def worker_thread():
+    """worker that processes inference requests from queue"""
+    print("worker thread started")
+    while True:
+        try:
+            # get request from queue
+            req_id, image = request_queue.get()
+            
+            # preprocess
+            img_array = preprocess_image(image)
+            
+            # run inference
+            model = get_model()
+            predictions = model.predict(img_array)
+            
+            # decode top 5 predictions
+            decoded = decode_predictions(predictions, top=5)[0]
+            
+            # format results
+            preds = [
+                {"class": label, "confidence": float(score)}
+                for (_, label, score) in decoded
+            ]
+            
+            # store result
+            results[req_id] = {"predictions": preds}
+            
+            # mark task as done
+            request_queue.task_done()
+            
+        except Exception as e:
+            print(f"error in worker thread: {e}")
+            results[req_id] = {"error": str(e)}
+
+# start worker thread
+worker = threading.Thread(target=worker_thread, daemon=True)
+worker.start()
 
 @app.route('/')
 def hello():
@@ -42,30 +85,19 @@ def infer():
         if request_queue.full():
             return jsonify({"error": "service overloaded, queue full"}), 503
         
-        # put request in queue (for now, still process synchronously)
-        # will add worker thread in next commit
-        request_queue.put(image, block=False)
+        # generate request id (simple timestamp for now)
+        req_id = str(time.time())
         
-        # process from queue
-        img_to_process = request_queue.get()
+        # put request in queue for worker to process
+        request_queue.put((req_id, image), block=False)
         
-        # preprocess
-        img_array = preprocess_image(img_to_process)
+        # wait for result from worker thread
+        while req_id not in results:
+            time.sleep(0.01)  # poll every 10ms
         
-        # run inference
-        model = get_model()
-        predictions = model.predict(img_array)
-        
-        # decode top 5 predictions
-        decoded = decode_predictions(predictions, top=5)[0]
-        
-        # format results
-        results = [
-            {"class": label, "confidence": float(score)}
-            for (_, label, score) in decoded
-        ]
-        
-        return jsonify({"predictions": results})
+        # get and return result
+        result = results.pop(req_id)
+        return jsonify(result)
     
     except queue.Full:
         # queue became full between check and put
