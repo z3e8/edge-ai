@@ -1,5 +1,6 @@
 import base64
 import io
+import logging
 import os
 import queue
 import threading
@@ -10,6 +11,10 @@ from PIL import Image
 from model import load_model, get_model
 from preprocessing import preprocess_image
 from tensorflow.keras.applications.mobilenet_v2 import decode_predictions
+from logging_config import setup_logging
+
+# setup logging
+logger = setup_logging()
 
 app = Flask(__name__)
 
@@ -24,20 +29,22 @@ results = {}
 
 # load model at startup
 try:
+    logger.info("loading model...")
     load_model()
+    logger.info("model loaded successfully")
 except Exception as e:
-    print(f"error loading model, exiting: {e}")
+    logger.error(f"error loading model, exiting: {e}")
     exit(1)
 
 def worker_thread():
     """worker that processes inference requests from queue"""
-    print("worker thread started")
+    logger.info("worker thread started")
     while True:
         try:
             # get request from queue
             req_id, image = request_queue.get()
             
-            print(f"processing request {req_id}")
+            logger.info(f"processing request", extra={'request_id': req_id})
             
             # preprocess
             img_array = preprocess_image(image)
@@ -61,13 +68,13 @@ def worker_thread():
                 "predictions": preds
             }
             
-            print(f"completed request {req_id}")
+            logger.info(f"completed request", extra={'request_id': req_id})
             
             # mark task as done
             request_queue.task_done()
             
         except Exception as e:
-            print(f"error processing request {req_id}: {e}")
+            logger.error(f"error processing request: {e}", extra={'request_id': req_id})
             results[req_id] = {"request_id": req_id, "error": str(e)}
 
 # start worker thread
@@ -84,7 +91,7 @@ def infer():
     req_id = str(uuid.uuid4())
     
     try:
-        print(f"received request {req_id}")
+        logger.info("received inference request", extra={'request_id': req_id})
         
         # get base64 image from request
         data = request.get_json()
@@ -96,12 +103,12 @@ def infer():
         
         # check if queue is full
         if request_queue.full():
-            print(f"queue full, rejecting request {req_id}")
+            logger.warning("queue full, rejecting request", extra={'request_id': req_id})
             return jsonify({"error": "service overloaded, queue full"}), 503
         
         # put request in queue for worker to process
         request_queue.put((req_id, image), block=False)
-        print(f"queued request {req_id}")
+        logger.info("request queued", extra={'request_id': req_id})
         
         # wait for result from worker thread
         while req_id not in results:
@@ -113,12 +120,12 @@ def infer():
     
     except queue.Full:
         # queue became full between check and put
-        print(f"queue full, rejecting request {req_id}")
+        logger.warning("queue full, rejecting request", extra={'request_id': req_id})
         return jsonify({"error": "service overloaded, queue full"}), 503
     
     except Exception as e:
         # handle invalid image format or decoding errors
-        print(f"error processing request {req_id}: {e}")
+        logger.error(f"error processing request: {e}", extra={'request_id': req_id})
         return jsonify({"request_id": req_id, "error": f"invalid image format: {str(e)}"}), 400
 
 if __name__ == '__main__':
