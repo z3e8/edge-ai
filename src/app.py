@@ -85,6 +85,18 @@ worker.start()
 def hello():
     return jsonify({"message": "hello world"})
 
+@app.route('/health', methods=['GET'])
+def health():
+    """health check endpoint"""
+    # check if model is loaded
+    model = get_model()
+    is_healthy = model is not None
+    
+    return jsonify({
+        "status": "healthy" if is_healthy else "unhealthy",
+        "model_loaded": is_healthy
+    }), 200 if is_healthy else 503
+
 @app.route('/infer', methods=['POST'])
 def infer():
     # generate request id
