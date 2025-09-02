@@ -4,6 +4,7 @@ import os
 import queue
 import threading
 import time
+import uuid
 from flask import Flask, jsonify, request
 from PIL import Image
 from model import load_model, get_model
@@ -36,6 +37,8 @@ def worker_thread():
             # get request from queue
             req_id, image = request_queue.get()
             
+            print(f"processing request {req_id}")
+            
             # preprocess
             img_array = preprocess_image(image)
             
@@ -52,15 +55,20 @@ def worker_thread():
                 for (_, label, score) in decoded
             ]
             
-            # store result
-            results[req_id] = {"predictions": preds}
+            # store result with request_id
+            results[req_id] = {
+                "request_id": req_id,
+                "predictions": preds
+            }
+            
+            print(f"completed request {req_id}")
             
             # mark task as done
             request_queue.task_done()
             
         except Exception as e:
-            print(f"error in worker thread: {e}")
-            results[req_id] = {"error": str(e)}
+            print(f"error processing request {req_id}: {e}")
+            results[req_id] = {"request_id": req_id, "error": str(e)}
 
 # start worker thread
 worker = threading.Thread(target=worker_thread, daemon=True)
@@ -72,7 +80,12 @@ def hello():
 
 @app.route('/infer', methods=['POST'])
 def infer():
+    # generate request id
+    req_id = str(uuid.uuid4())
+    
     try:
+        print(f"received request {req_id}")
+        
         # get base64 image from request
         data = request.get_json()
         img_b64 = data.get('image')
@@ -83,13 +96,12 @@ def infer():
         
         # check if queue is full
         if request_queue.full():
+            print(f"queue full, rejecting request {req_id}")
             return jsonify({"error": "service overloaded, queue full"}), 503
-        
-        # generate request id (simple timestamp for now)
-        req_id = str(time.time())
         
         # put request in queue for worker to process
         request_queue.put((req_id, image), block=False)
+        print(f"queued request {req_id}")
         
         # wait for result from worker thread
         while req_id not in results:
@@ -101,11 +113,13 @@ def infer():
     
     except queue.Full:
         # queue became full between check and put
+        print(f"queue full, rejecting request {req_id}")
         return jsonify({"error": "service overloaded, queue full"}), 503
     
     except Exception as e:
         # handle invalid image format or decoding errors
-        return jsonify({"error": f"invalid image format: {str(e)}"}), 400
+        print(f"error processing request {req_id}: {e}")
+        return jsonify({"request_id": req_id, "error": f"invalid image format: {str(e)}"}), 400
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
