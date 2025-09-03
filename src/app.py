@@ -50,7 +50,7 @@ def worker_thread():
     while True:
         try:
             # get request from queue
-            req_id, image = request_queue.get()
+            req_id, image, start_time = request_queue.get()
             
             logger.info(f"processing request", extra={'request_id': req_id})
             
@@ -70,10 +70,19 @@ def worker_thread():
                 for (_, label, score) in decoded
             ]
             
+            # calculate latency
+            end_time = time.time()
+            latency_ms = (end_time - start_time) * 1000
+            
+            # update metrics
+            metrics['completed_requests'] += 1
+            metrics['total_latency_ms'] += latency_ms
+            
             # store result with request_id
             results[req_id] = {
                 "request_id": req_id,
-                "predictions": preds
+                "predictions": preds,
+                "latency_ms": round(latency_ms, 2)
             }
             
             logger.info(f"completed request", extra={'request_id': req_id})
@@ -121,8 +130,9 @@ def get_metrics():
 
 @app.route('/infer', methods=['POST'])
 def infer():
-    # generate request id
+    # generate request id and start timer
     req_id = str(uuid.uuid4())
+    start_time = time.time()
     
     # increment total requests
     metrics['total_requests'] += 1
@@ -144,8 +154,8 @@ def infer():
             logger.warning("queue full, rejecting request", extra={'request_id': req_id})
             return jsonify({"error": "service overloaded, queue full"}), 503
         
-        # put request in queue for worker to process
-        request_queue.put((req_id, image), block=False)
+        # put request in queue for worker to process (include start time)
+        request_queue.put((req_id, image, start_time), block=False)
         logger.info("request queued", extra={'request_id': req_id})
         
         # wait for result from worker thread
