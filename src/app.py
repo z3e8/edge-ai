@@ -21,6 +21,9 @@ app = Flask(__name__)
 # config from env vars
 QUEUE_SIZE = int(os.getenv('QUEUE_SIZE', 10))
 
+# track startup time for uptime calculation
+startup_time = time.time()
+
 # create request queue
 request_queue = queue.Queue(maxsize=QUEUE_SIZE)
 
@@ -126,6 +129,19 @@ def get_metrics():
         "requests_rejected": metrics['requests_rejected'],
         "average_latency_ms": round(avg_latency, 2),
         "current_queue_depth": request_queue.qsize()
+    })
+
+@app.route('/status', methods=['GET'])
+def get_status():
+    """status endpoint showing system info"""
+    uptime = time.time() - startup_time
+    
+    return jsonify({
+        "model": "MobileNetV2",
+        "queue_capacity": QUEUE_SIZE,
+        "queue_current": request_queue.qsize(),
+        "uptime_seconds": round(uptime, 2),
+        "version": "1.0.0"
     })
 
 @app.route('/infer', methods=['POST'])
