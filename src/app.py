@@ -27,6 +27,14 @@ request_queue = queue.Queue(maxsize=QUEUE_SIZE)
 # dict to store results {request_id: result}
 results = {}
 
+# metrics tracking
+metrics = {
+    "total_requests": 0,
+    "requests_rejected": 0,
+    "total_latency_ms": 0,
+    "completed_requests": 0
+}
+
 # load model at startup
 try:
     logger.info("loading model...")
@@ -97,10 +105,27 @@ def health():
         "model_loaded": is_healthy
     }), 200 if is_healthy else 503
 
+@app.route('/metrics', methods=['GET'])
+def get_metrics():
+    """metrics endpoint"""
+    avg_latency = 0
+    if metrics['completed_requests'] > 0:
+        avg_latency = metrics['total_latency_ms'] / metrics['completed_requests']
+    
+    return jsonify({
+        "total_requests": metrics['total_requests'],
+        "requests_rejected": metrics['requests_rejected'],
+        "average_latency_ms": round(avg_latency, 2),
+        "current_queue_depth": request_queue.qsize()
+    })
+
 @app.route('/infer', methods=['POST'])
 def infer():
     # generate request id
     req_id = str(uuid.uuid4())
+    
+    # increment total requests
+    metrics['total_requests'] += 1
     
     try:
         logger.info("received inference request", extra={'request_id': req_id})
@@ -115,6 +140,7 @@ def infer():
         
         # check if queue is full
         if request_queue.full():
+            metrics['requests_rejected'] += 1
             logger.warning("queue full, rejecting request", extra={'request_id': req_id})
             return jsonify({"error": "service overloaded, queue full"}), 503
         
@@ -132,6 +158,7 @@ def infer():
     
     except queue.Full:
         # queue became full between check and put
+        metrics['requests_rejected'] += 1
         logger.warning("queue full, rejecting request", extra={'request_id': req_id})
         return jsonify({"error": "service overloaded, queue full"}), 503
     
