@@ -23,14 +23,14 @@ class JsonFormatter(logging.Formatter):
         
         return json.dumps(log_data)
 
-def setup_logging():
+def setup_logging(log_level='INFO'):
     """configure structured json logging"""
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
     
     # configure root logger
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
     logger.addHandler(handler)
     
     return logger

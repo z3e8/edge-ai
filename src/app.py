@@ -13,13 +13,19 @@ from preprocessing import preprocess_image
 from tensorflow.keras.applications.mobilenet_v2 import decode_predictions
 from logging_config import setup_logging
 
-# setup logging
-logger = setup_logging()
+# setup logging (will be configured with LOG_LEVEL below)
+logger = None
 
 app = Flask(__name__)
 
 # config from env vars
 QUEUE_SIZE = int(os.getenv('QUEUE_SIZE', 10))
+HOST = os.getenv('HOST', '0.0.0.0')
+PORT = int(os.getenv('PORT', 5000))
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+
+# setup logging with configured level
+logger = setup_logging(LOG_LEVEL)
 
 # track startup time for uptime calculation
 startup_time = time.time()
@@ -194,5 +200,6 @@ def infer():
         return jsonify({"request_id": req_id, "error": f"invalid image format: {str(e)}"}), 400
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    logger.info(f"starting server on {HOST}:{PORT}, queue size: {QUEUE_SIZE}")
+    app.run(host=HOST, port=PORT)
 
