@@ -3,6 +3,8 @@ import io
 import logging
 import os
 import queue
+import signal
+import sys
 import threading
 import time
 import uuid
@@ -103,9 +105,31 @@ def worker_thread():
             logger.error(f"error processing request: {e}", extra={'request_id': req_id})
             results[req_id] = {"request_id": req_id, "error": str(e)}
 
+# flag for graceful shutdown
+shutdown_flag = False
+
 # start worker thread
 worker = threading.Thread(target=worker_thread, daemon=True)
 worker.start()
+
+def signal_handler(sig, frame):
+    """handle SIGTERM/SIGINT for graceful shutdown"""
+    global shutdown_flag
+    logger.info("shutdown signal received, draining queue...")
+    shutdown_flag = True
+    
+    # wait for queue to drain (with timeout)
+    try:
+        request_queue.join()  # wait for all tasks to complete
+        logger.info("queue drained, shutting down")
+    except:
+        logger.warning("queue drain timeout, forcing shutdown")
+    
+    sys.exit(0)
+
+# register signal handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 @app.route('/')
 def hello():
