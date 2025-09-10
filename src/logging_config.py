@@ -24,13 +24,17 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(log_data)
 
 def setup_logging(log_level='INFO'):
-    """configure structured json logging"""
+    """configure structured json logging (thread-safe by default)"""
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
     
     # configure root logger
+    # python logging module is already thread-safe, uses locks internally
     logger = logging.getLogger()
     logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+    
+    # clear existing handlers to avoid duplicates
+    logger.handlers.clear()
     logger.addHandler(handler)
     
     return logger
