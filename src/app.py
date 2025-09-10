@@ -186,19 +186,52 @@ def infer():
     try:
         logger.info("received inference request", extra={'request_id': req_id})
         
-        # get base64 image from request
+        # get json data
         data = request.get_json()
-        img_b64 = data.get('image')
+        if data is None:
+            logger.error("missing json body", extra={'request_id': req_id})
+            return jsonify({
+                "request_id": req_id,
+                "error": "missing json body"
+            }), 400
         
-        # decode base64 to image
-        img_bytes = base64.b64decode(img_b64)
-        image = Image.open(io.BytesIO(img_bytes))
+        # check for image field
+        img_b64 = data.get('image')
+        if not img_b64:
+            logger.error("missing image field", extra={'request_id': req_id})
+            return jsonify({
+                "request_id": req_id,
+                "error": "missing 'image' field in request"
+            }), 400
+        
+        # decode base64
+        try:
+            img_bytes = base64.b64decode(img_b64)
+        except Exception as e:
+            logger.error(f"invalid base64: {e}", extra={'request_id': req_id})
+            return jsonify({
+                "request_id": req_id,
+                "error": "invalid base64 encoding"
+            }), 400
+        
+        # open image
+        try:
+            image = Image.open(io.BytesIO(img_bytes))
+        except Exception as e:
+            logger.error(f"invalid image format: {e}", extra={'request_id': req_id})
+            return jsonify({
+                "request_id": req_id,
+                "error": "unsupported image format (use jpeg, png, etc)"
+            }), 400
         
         # check if queue is full
         if request_queue.full():
             metrics['requests_rejected'] += 1
             logger.warning("queue full, rejecting request", extra={'request_id': req_id})
-            return jsonify({"error": "service overloaded, queue full"}), 503
+            return jsonify({
+                "request_id": req_id,
+                "error": "service overloaded, queue is full. try again later."
+            }), 503
         
         # put request in queue for worker to process (include start time)
         request_queue.put((req_id, image, start_time), block=False)
@@ -216,12 +249,18 @@ def infer():
         # queue became full between check and put
         metrics['requests_rejected'] += 1
         logger.warning("queue full, rejecting request", extra={'request_id': req_id})
-        return jsonify({"error": "service overloaded, queue full"}), 503
+        return jsonify({
+            "request_id": req_id,
+            "error": "service overloaded, queue is full. try again later."
+        }), 503
     
     except Exception as e:
-        # handle invalid image format or decoding errors
-        logger.error(f"error processing request: {e}", extra={'request_id': req_id})
-        return jsonify({"request_id": req_id, "error": f"invalid image format: {str(e)}"}), 400
+        # catch-all for unexpected errors
+        logger.error(f"unexpected error: {e}", extra={'request_id': req_id})
+        return jsonify({
+            "request_id": req_id,
+            "error": f"internal server error: {str(e)}"
+        }), 500
 
 if __name__ == '__main__':
     logger.info(f"starting server on {HOST}:{PORT}, queue size: {QUEUE_SIZE}")
