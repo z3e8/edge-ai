@@ -88,25 +88,114 @@ This is intentionally NOT a production system. Missing features:
 
 These limitations are documented and understood - the goal is to demonstrate core concepts, not build production software.
 
-## Quick Start
+## Setup Instructions
 
-See setup instructions below for full details.
+### Prerequisites
 
-```bash
-# install deps
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+- Raspberry Pi 5 with 8GB RAM (or similar Linux system)
+- 64-bit Raspberry Pi OS (or Ubuntu/Debian)
+- Python 3.9+
+- Internet connection for initial setup
 
-# run service
-python3 src/app.py
+### Installation
 
-# test it (in another terminal)
-python3 tests/test_basic.py
+1. **Clone the repository**
+   ```bash
+   git clone <your-repo-url>
+   cd edge-ai
+   ```
 
-# run demo
-python3 tests/demo.py
-```
+2. **Create virtual environment**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. **Install dependencies**
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+   
+   Note: TensorFlow installation may take 10-15 minutes on Raspberry Pi.
+
+4. **Download model (optional)**
+   
+   The model auto-downloads on first run, but you can pre-download:
+   ```bash
+   python3 -c "import tensorflow as tf; tf.keras.applications.MobileNetV2(weights='imagenet')"
+   ```
+
+5. **Run the service**
+   ```bash
+   python3 src/app.py
+   ```
+   
+   Service will start on http://0.0.0.0:5000
+
+6. **Test it** (in another terminal)
+   ```bash
+   source venv/bin/activate
+   python3 tests/test_basic.py
+   ```
+
+7. **Run demo**
+   ```bash
+   python3 tests/demo.py
+   ```
+
+### Installing as System Service
+
+To run automatically on boot:
+
+1. **Edit service file** if paths differ
+   ```bash
+   # check WorkingDirectory and ExecStart paths in edge-ai.service
+   ```
+
+2. **Install service**
+   ```bash
+   sudo cp edge-ai.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable edge-ai
+   sudo systemctl start edge-ai
+   ```
+
+3. **Check status**
+   ```bash
+   sudo systemctl status edge-ai
+   journalctl -u edge-ai -f
+   ```
+
+### Configuration
+
+Environment variables (set in edge-ai.service or shell):
+
+- `QUEUE_SIZE` - Max queue depth (default: 10)
+- `PORT` - HTTP port (default: 5000)
+- `HOST` - Bind address (default: 0.0.0.0)
+- `LOG_LEVEL` - Logging level (default: INFO)
+
+### Troubleshooting
+
+**Service won't start:**
+- Check logs: `journalctl -u edge-ai -n 50`
+- Verify paths in service file match your installation
+- Ensure pi user has permissions
+
+**Model download fails:**
+- Check internet connection
+- Model cache location: `~/.keras/models/`
+- May need to download on another machine and transfer
+
+**Out of memory:**
+- Verify 8GB RAM: `free -h`
+- Close other applications
+- Reduce QUEUE_SIZE
+
+**Can't connect remotely:**
+- Check firewall: `sudo ufw status`
+- Ensure HOST=0.0.0.0 not 127.0.0.1
 
 ## Hardware Target
 
