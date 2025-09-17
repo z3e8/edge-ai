@@ -206,13 +206,49 @@ Environment variables (set in edge-ai.service or shell):
   - Throughput: 3-10 requests/second
   - Memory: ~400-500MB
 
-## Technology Choices
+## Design Decisions & Tradeoffs
 
-- **Flask** - Simple, mature, sufficient for demo scope
-- **queue.Queue** - Thread-safe, no external deps, good for single-process
-- **MobileNetV2** - Designed for edge/mobile, good accuracy/size tradeoff
-- **Single worker thread** - Matches CPU-bound workload, simpler than multiprocessing
-- **JSON logging** - Structured, machine-parseable, production-ready pattern
+### Flask vs FastAPI
+**Chosen:** Flask  
+**Alternative:** FastAPI
+
+Flask is simpler and more mature. No async/await needed since inference is CPU-bound, not I/O-bound. FastAPI has better docs and modern features, but adds complexity we don't need for this scope.
+
+### Single Thread vs Multiprocessing
+**Chosen:** Single worker thread  
+**Alternative:** Multiprocessing pool
+
+Inference is CPU-bound on a single core anyway. The GIL doesn't hurt much since TensorFlow runs in C++. Single thread is simpler for state management and matches hardware constraints.
+
+### queue.Queue vs Redis
+**Chosen:** In-memory queue.Queue  
+**Alternative:** External queue (Redis)
+
+No external dependencies needed. Python's queue.Queue is thread-safe by default and sufficient for single-process demo. Trade persistence and distributed support for simplicity.
+
+### Immediate Rejection vs Blocking
+**Chosen:** Immediate 503 when queue full  
+**Alternative:** Block with timeout or return 202 Accepted
+
+Gives client more control to implement their own retry logic. Clearer failure mode. Prevents confusion from timeouts. More honest about capacity limits.
+
+### MobileNetV2 vs Larger Models
+**Chosen:** MobileNetV2  
+**Alternative:** ResNet, EfficientNet, custom model
+
+MobileNetV2 is designed for mobile/edge devices. Good accuracy/size tradeoff (~14MB). Well-supported in TensorFlow. Pre-trained on ImageNet for common use cases.
+
+### JSON Logs vs Plain Text
+**Chosen:** Structured JSON logs  
+**Alternative:** Plain text with formatting
+
+Machine-parseable logs are standard for production systems. Easy to ingest into log aggregators. Shows modern practice even though harder to read raw.
+
+### No Authentication
+**Chosen:** No auth  
+**Alternative:** API keys, OAuth, mTLS
+
+Demo scope - authentication adds significant complexity. Documented as known limitation. Real production system would need auth.
 
 ## Project Goals
 
