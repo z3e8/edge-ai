@@ -250,10 +250,61 @@ Machine-parseable logs are standard for production systems. Easy to ingest into 
 
 Demo scope - authentication adds significant complexity. Documented as known limitation. Real production system would need auth.
 
+## Known Limitations
+
+This is a demonstration project, not production software. Here's what's missing:
+
+### Security
+- No authentication or authorization
+- No rate limiting per client
+- No input size limits (DoS possible with huge images)
+- No HTTPS (plain HTTP only)
+
+### Scalability
+- Single device only
+- No horizontal scaling
+- No load balancing
+- Fixed queue size
+
+### Reliability
+- No queue persistence (requests lost on crash)
+- No request retry mechanism
+- No circuit breaker patterns
+- No graceful degradation beyond queue rejection
+
+### Observability
+- No distributed tracing
+- No metrics aggregation (Prometheus, etc)
+- No alerting
+- Logs not rotated (unbounded disk usage)
+
+### Operations
+- No A/B testing capability
+- No blue/green deployments
+- No canary releases
+- No automated rollback
+
+## Future Improvements
+
+If this were to become a real production system, priorities would be:
+
+1. **Authentication** - API key or JWT-based auth
+2. **Persistent Queue** - Redis or disk-backed queue for crash recovery
+3. **Resource Limits** - Max image size, request timeouts
+4. **Metrics Export** - Prometheus endpoint for monitoring
+5. **Model Versioning** - Support multiple models/versions
+6. **Batch Inference** - Process multiple images per inference call
+7. **GPU Support** - Detect and use GPU if available
+8. **Log Rotation** - Size/time-based rotation
+9. **Better Health Checks** - Separate readiness/liveness probes
+10. **Config Management** - Proper config file support
+
 ## Project Goals
 
 1. Demonstrate systems thinking (queueing, backpressure, observability)
 2. Show practical edge AI implementation
 3. Document design tradeoffs honestly
 4. Keep it simple and clear (not clever or over-optimized)
+
+**This project shows understanding through simplicity and honest documentation, not through feature completeness.**
 
