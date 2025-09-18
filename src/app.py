@@ -21,8 +21,8 @@ logger = None
 app = Flask(__name__)
 
 # config from env vars
-QUEUE_SIZE = int(os.getenv('QUEUE_SIZE', 10))
-HOST = os.getenv('HOST', '0.0.0.0')
+QUEUE_SIZE = int(os.getenv('QUEUE_SIZE', 10))  # max queue depth
+HOST = os.getenv('HOST', '0.0.0.0')  # bind to all interfaces
 PORT = int(os.getenv('PORT', 5000))
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
@@ -32,13 +32,16 @@ logger = setup_logging(LOG_LEVEL)
 # track startup time for uptime calculation
 startup_time = time.time()
 
-# create request queue
+# create bounded request queue
+# rejects with 503 when full (backpressure handling)
 request_queue = queue.Queue(maxsize=QUEUE_SIZE)
 
-# dict to store results {request_id: result}
+# dict to pass results from worker thread back to api handlers
+# keyed by request_id
 results = {}
 
-# metrics tracking
+# basic metrics tracking
+# note: not thread-safe, but good enough for demo
 metrics = {
     "total_requests": 0,
     "requests_rejected": 0,
@@ -56,40 +59,44 @@ except Exception as e:
     exit(1)
 
 def worker_thread():
-    """worker that processes inference requests from queue"""
+    """
+    worker that processes inference requests from queue
+    runs continuously, processing one request at a time
+    single worker = sequential processing = simple concurrency model
+    """
     logger.info("worker thread started")
     while True:
         try:
-            # get request from queue
+            # blocking get - waits for next request
             req_id, image, start_time = request_queue.get()
             
             logger.info(f"processing request", extra={'request_id': req_id})
             
-            # preprocess
+            # preprocess image for model input
             img_array = preprocess_image(image)
             
-            # run inference
+            # run inference (cpu-bound, takes ~100-300ms on pi5)
             model = get_model()
             predictions = model.predict(img_array)
             
-            # decode top 5 predictions
+            # decode imagenet class labels
             decoded = decode_predictions(predictions, top=5)[0]
             
-            # format results
+            # format as json-friendly list
             preds = [
                 {"class": label, "confidence": float(score)}
                 for (_, label, score) in decoded
             ]
             
-            # calculate latency
+            # calculate end-to-end latency
             end_time = time.time()
             latency_ms = (end_time - start_time) * 1000
             
-            # update metrics
+            # update metrics (not thread-safe but good enough)
             metrics['completed_requests'] += 1
             metrics['total_latency_ms'] += latency_ms
             
-            # store result with request_id
+            # store result for api handler to pick up
             results[req_id] = {
                 "request_id": req_id,
                 "predictions": preds,
@@ -98,7 +105,7 @@ def worker_thread():
             
             logger.info(f"completed request", extra={'request_id': req_id})
             
-            # mark task as done
+            # signal queue that task is done
             request_queue.task_done()
             
         except Exception as e:
