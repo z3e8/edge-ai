@@ -126,11 +126,24 @@ def signal_handler(sig, frame):
     shutdown_flag = True
     
     # wait for queue to drain (with timeout)
+    # join() waits for all queue.task_done() calls
+    queue_size = request_queue.qsize()
+    logger.info(f"waiting for {queue_size} queued requests to complete...")
+    
     try:
-        request_queue.join()  # wait for all tasks to complete
-        logger.info("queue drained, shutting down")
-    except:
-        logger.warning("queue drain timeout, forcing shutdown")
+        # wait up to 60 seconds for queue to drain
+        # assumes ~10 req/sec worst case = 6s per request
+        import threading
+        drain_thread = threading.Thread(target=request_queue.join)
+        drain_thread.start()
+        drain_thread.join(timeout=60)
+        
+        if drain_thread.is_alive():
+            logger.warning("queue drain timeout after 60s, forcing shutdown")
+        else:
+            logger.info("queue drained successfully, shutting down cleanly")
+    except Exception as e:
+        logger.error(f"error during shutdown: {e}")
     
     sys.exit(0)
 
