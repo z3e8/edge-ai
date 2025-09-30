@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+"""edge ai inference service - main application"""
+
 import base64
 import io
 import logging

@@ -1,3 +1,5 @@
+"""image preprocessing for inference"""
+
 import numpy as np
 from PIL import Image
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input

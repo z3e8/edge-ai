@@ -1,3 +1,5 @@
+"""model loading and management"""
+
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.applications.mobilenet_v2 import decode_predictions
