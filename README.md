@@ -1,23 +1,21 @@
-# Edge AI Inference Platform
+# Edge AI Inference on Raspberry Pi
 
-A lightweight machine learning inference service designed for edge devices like Raspberry Pi. Demonstrates systems thinking, backpressure handling, and practical edge AI deployment.
+Lightweight ML inference designed for edge devices like Raspberry Pi. 
 
 ## Overview
 
-This project runs a pre-trained MobileNetV2 model for image classification on a Raspberry Pi, exposing a REST API for inference requests. It includes request queueing with backpressure, structured logging, and graceful degradation under load.
-
-**This is a resume demonstration project** - intentionally scoped to show understanding without overengineering.
+I use MobileNetV2 model for image classification on a Raspberry Pi, exposing a REST API for inference requests. Includes request queueing with backpressure, structured logging, and graceful degradation under load.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Client Applications                      │
+│                     Client Applications                     │
 └────────────────────────────┬────────────────────────────────┘
                              │ HTTP/REST
                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Flask API Server                        │
+┌────────────────────────────────────────────────────────────┐
+│                      Flask API Server                      │
 │  ┌──────────────────────┐      ┌──────────────────────┐    │
 │  │   Data Plane         │      │   Control Plane      │    │
 │  │   /infer (POST)      │      │   /health (GET)      │    │
@@ -28,18 +26,18 @@ This project runs a pre-trained MobileNetV2 model for image classification on a 
               │
               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Request Queue (FIFO)                      │
-│              (Bounded, In-Memory, Thread-Safe)               │
+│                    Request Queue (FIFO)                     │
+│              (Bounded, In-Memory, Thread-Safe)              │
 └────────────────────────────┬────────────────────────────────┘
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      Worker Thread                           │
-│  1. Dequeue request                                          │
-│  2. Preprocess image (resize to 224x224)                     │
-│  3. Run inference (MobileNetV2)                              │
-│  4. Return top-5 predictions                                 │
-│  5. Update metrics                                           │
+│                      Worker Thread                          │
+│  1. Dequeue request                                         │
+│  2. Preprocess image (resize to 224x224)                    │
+│  3. Run inference (MobileNetV2)                             │
+│  4. Return top-5 predictions                                │
+│  5. Update metrics                                          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -73,31 +71,70 @@ This project runs a pre-trained MobileNetV2 model for image classification on a 
 - Queue depth monitoring
 - Rejection metrics
 
-## What's Out of Scope
+### Webcam Inference Mode
 
-This is intentionally NOT a production system. Missing features:
+A standalone script that captures images from a USB webcam and runs inference locally without the API server. Useful for continuous monitoring or demo purposes.
 
-- No authentication or authorization
-- No rate limiting per client
-- No request persistence (queue is in-memory)
-- No horizontal scaling or load balancing
-- No GPU support
-- No model versioning or updates
-- No distributed tracing
-- Single device only
-
-These limitations are documented and understood - the goal is to demonstrate core concepts, not build production software.
+- Captures frames at configurable intervals (default: 5 seconds)
+- Runs inference using the same MobileNetV2 model
+- Prints top-5 predictions with confidence scores
+- No API server required - direct model inference
 
 ## Setup Instructions
 
 ### Prerequisites
 
-- Raspberry Pi 5 with 8GB RAM (or similar Linux system)
-- 64-bit Raspberry Pi OS (or Ubuntu/Debian)
+**For Raspberry Pi deployment:**
+- Raspberry Pi or linux system (I used RP5 with 8GB RAM)
 - Python 3.9+
 - Internet connection for initial setup
 
-### Installation
+**For local development/testing:**
+- macOS or Linux
+- Python 3.9+
+- Internet connection for downloading dependencies and model
+
+### Local Development (Mac/Linux)
+
+You can test the project locally before deploying to Raspberry Pi:
+
+1. **Create virtual environment**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+
+3. **Run the service**
+   ```bash
+   python3 src/app.py
+   ```
+   
+   Service will start on http://localhost:5001
+
+4. **Test it** (in another terminal)
+   ```bash
+   source venv/bin/activate
+   python3 tests/test_basic.py
+   ```
+
+5. **Run demo or load test**
+   ```bash
+   python3 tests/demo.py
+   python3 tests/load_test.py
+   ```
+
+6. **Run webcam inference** (if webcam available)
+   ```bash
+   python3 src/webcam_inference.py
+   ```
+
+### Installation (Raspberry Pi)
 
 1. **Clone the repository**
    ```bash
@@ -116,8 +153,6 @@ These limitations are documented and understood - the goal is to demonstrate cor
    pip install --upgrade pip
    pip install -r requirements.txt
    ```
-   
-   Note: TensorFlow installation may take 10-15 minutes on Raspberry Pi.
 
 4. **Download model (optional)**
    
@@ -142,6 +177,18 @@ These limitations are documented and understood - the goal is to demonstrate cor
 7. **Run demo**
    ```bash
    python3 tests/demo.py
+   ```
+
+8. **Run webcam inference mode** (optional)
+   ```bash
+   # requires USB webcam connected
+   python3 src/webcam_inference.py
+   
+   # custom interval (every 10 seconds)
+   CAMERA_INTERVAL=10 python3 src/webcam_inference.py
+   
+   # use different camera (if multiple cameras)
+   CAMERA_INDEX=1 python3 src/webcam_inference.py
    ```
 
 ### Installing as System Service
@@ -169,63 +216,17 @@ To run automatically on boot:
 
 ### Configuration
 
-Environment variables (set in edge-ai.service or shell):
+**API Server** environment variables (set in edge-ai.service or shell):
 
 - `QUEUE_SIZE` - Max queue depth (default: 10)
 - `PORT` - HTTP port (default: 5000)
 - `HOST` - Bind address (default: 0.0.0.0)
 - `LOG_LEVEL` - Logging level (default: INFO)
 
-### Troubleshooting
+**Webcam Inference** environment variables:
 
-**Service won't start:**
-- Check logs: `journalctl -u edge-ai -n 50`
-- Verify paths in service file match your installation
-- Ensure pi user has permissions
-
-**Model download fails:**
-- Check internet connection
-- Model cache location: `~/.keras/models/`
-- May need to download on another machine and transfer
-
-**Out of memory:**
-- Verify 8GB RAM: `free -h`
-- Close other applications
-- Reduce QUEUE_SIZE
-
-**Can't connect remotely:**
-- Check firewall: `sudo ufw status`
-- Ensure HOST=0.0.0.0 not 127.0.0.1
-
-## Hardware & Performance
-
-### Target Hardware
-- Raspberry Pi 5 (8GB RAM, 2.4GHz quad-core)
-- 64-bit Raspberry Pi OS
-- 128GB SD card
-
-### Measured Performance (on Raspberry Pi 5)
-
-**Latency:**
-- P50: ~175ms
-- P95: ~290ms
-- P99: ~420ms
-
-**Throughput:**
-- Sustained: 4-6 requests/second
-- Burst (until queue fills): ~10 requests/second
-- Queue size 10 absorbs ~2 second burst
-
-**Resource Usage:**
-- Memory: 450-480MB steady state
-- CPU: 95-100% per core during inference
-- Model size: ~14MB on disk, ~150MB in memory
-- Startup time: ~8 seconds (model loading)
-
-**Queue Behavior:**
-- Queue fills in ~1.5-2 seconds under heavy load
-- Recovery time: ~1-2 seconds after load drops
-- 503 rejection rate: ~30-40% under sustained overload
+- `CAMERA_INTERVAL` - Seconds between captures (default: 5)
+- `CAMERA_INDEX` - Camera device index (default: 0)
 
 ## Design Decisions & Tradeoffs
 
@@ -259,73 +260,13 @@ Gives client more control to implement their own retry logic. Clearer failure mo
 
 MobileNetV2 is designed for mobile/edge devices. Good accuracy/size tradeoff (~14MB). Well-supported in TensorFlow. Pre-trained on ImageNet for common use cases.
 
-### JSON Logs vs Plain Text
-**Chosen:** Structured JSON logs  
-**Alternative:** Plain text with formatting
+## Future Improvements 
 
-Machine-parseable logs are standard for production systems. Easy to ingest into log aggregators. Shows modern practice even though harder to read raw.
-
-### No Authentication
-**Chosen:** No auth  
-**Alternative:** API keys, OAuth, mTLS
-
-Demo scope - authentication adds significant complexity. Documented as known limitation. Real production system would need auth.
-
-## Known Limitations
-
-This is a demonstration project, not production software. Here's what's missing:
-
-### Security
-- No authentication or authorization
-- No rate limiting per client
-- No input size limits (DoS possible with huge images)
-- No HTTPS (plain HTTP only)
-
-### Scalability
-- Single device only
-- No horizontal scaling
-- No load balancing
-- Fixed queue size
-
-### Reliability
-- No queue persistence (requests lost on crash)
-- No request retry mechanism
-- No circuit breaker patterns
-- No graceful degradation beyond queue rejection
-
-### Observability
-- No distributed tracing
-- No metrics aggregation (Prometheus, etc)
-- No alerting
-- Logs not rotated (unbounded disk usage)
-
-### Operations
-- No A/B testing capability
-- No blue/green deployments
-- No canary releases
-- No automated rollback
-
-## Future Improvements
-
-If this were to become a real production system, priorities would be:
-
-1. **Authentication** - API key or JWT-based auth
-2. **Persistent Queue** - Redis or disk-backed queue for crash recovery
-3. **Resource Limits** - Max image size, request timeouts
-4. **Metrics Export** - Prometheus endpoint for monitoring
-5. **Model Versioning** - Support multiple models/versions
-6. **Batch Inference** - Process multiple images per inference call
-7. **GPU Support** - Detect and use GPU if available
-8. **Log Rotation** - Size/time-based rotation
-9. **Better Health Checks** - Separate readiness/liveness probes
-10. **Config Management** - Proper config file support
-
-## Project Goals
-
-1. Demonstrate systems thinking (queueing, backpressure, observability)
-2. Show practical edge AI implementation
-3. Document design tradeoffs honestly
-4. Keep it simple and clear (not clever or over-optimized)
-
-**This project shows understanding through simplicity and honest documentation, not through feature completeness.**
-
+- auth
+- rate limiting 
+- request persistence (queue is in-memory)
+- horizontal scaling or load balancing
+- GPU support
+- model versioning or updates
+- distributed tracing
+- multiple devices
