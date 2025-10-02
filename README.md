@@ -1,10 +1,78 @@
 # Edge AI Inference on Raspberry Pi
 
-Lightweight ML inference designed for edge devices like Raspberry Pi. 
+A lightweight ML inference service for edge devices like a Raspberry Pi.
 
 ## Overview
 
-I use MobileNetV2 model for image classification on a Raspberry Pi, exposing a REST API for inference requests. Includes request queueing with backpressure, structured logging, and graceful degradation under load.
+I use a MobileNetV2 model for image classification on a Raspberry Pi, exposed as a small REST API for inference requests. It includes request queueing with backpressure, structured logging, and it fails fast under load instead of slowing everything down.
+
+I built this to get a feel for what “production-style” ML inference looks like on constrained edge hardware (not just running a model in a notebook). The goal was to understand backpressure, latency tradeoffs, and the failure modes you hit when inference can’t keep up with incoming requests.
+
+I intentionally kept it to a single worker and a bounded queue so overload behavior stays explicit and observable.
+
+
+## Core Components
+
+### API Endpoints
+
+- **POST /infer** - send a base64-encoded image for classification
+- **GET /health** - quick health check (returns model load status)
+- **GET /metrics** - view request metrics and latency stats
+- **GET /status** - view system status (uptime, queue depth, model info)
+
+### Request Queue
+
+- bounded FIFO queue (default size: 10)
+- returns 503 immediately when the queue is full (no blocking)
+- a single worker thread processes requests one at a time
+- built to make backpressure behavior obvious
+
+### Model
+
+- pretrained MobileNetV2 (ImageNet weights)
+- loaded once at startup
+- CPU-only inference
+- returns top-5 predictions with confidence scores
+
+### Observability
+
+- structured JSON logging with request IDs (so you can follow a request end-to-end)
+- request latency tracking
+- queue depth monitoring
+- rejection metrics
+
+### Webcam Inference Mode
+
+Captures images from a USB webcam (default: 1 image every 5 seconds) and runs inference locally, printing the top-5 predictions.
+
+- captures frames at configurable intervals (default: 5 seconds)
+- runs inference using the same MobileNetV2 model
+- prints top-5 predictions with confidence scores
+- no API server required - direct model inference
+
+## Design Decisions
+
+- **Single worker thread**: I kept it to one worker to keep CPU usage predictable on the Pi and avoid contention inside TensorFlow. Throughput is lower, but tail latency is easier to reason about.
+- **Bounded in-memory queue**: I use a bounded queue to keep backpressure explicit instead of letting latency grow unbounded.
+- **503 on overload**: I chose failing fast over blocking to protect the system and make overload behavior obvious to clients.
+- **CPU-only inference**: I stuck to CPU-only to match typical Raspberry Pi setups and avoid hardware-specific dependencies.
+
+
+## Known Limitations
+
+- TensorFlow startup time is noticeable on the Pi due to model load.
+- Throughput is limited to one inference at a time by design.
+- Base64 image upload adds overhead but simplifies client compatibility.
+- Metrics are process-local and reset on restart.
+
+
+## Future Improvements
+
+- Replace base64 image uploads with multipart streaming to reduce memory overhead.
+- Add simple token-based auth to protect `/infer` on shared networks.
+- Experiment with a small worker pool to compare throughput vs tail latency on RP5.
+
+
 
 ## Architecture
 
@@ -41,45 +109,6 @@ I use MobileNetV2 model for image classification on a Raspberry Pi, exposing a R
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Core Components
-
-### API Endpoints
-
-- **POST /infer** - Submit base64-encoded image for classification
-- **GET /health** - Health check (returns model load status)
-- **GET /metrics** - Request metrics and latency stats
-- **GET /status** - System status (uptime, queue depth, model info)
-
-### Request Queue
-
-- Bounded FIFO queue (default size: 10)
-- Immediate 503 rejection when full (no blocking)
-- Single worker thread processes requests sequentially
-- Demonstrates backpressure handling
-
-### Model
-
-- Pre-trained MobileNetV2 (ImageNet weights)
-- Loaded once at startup
-- CPU-only inference
-- Returns top-5 predictions with confidence scores
-
-### Observability
-
-- Structured JSON logging with request IDs
-- Request latency tracking
-- Queue depth monitoring
-- Rejection metrics
-
-### Webcam Inference Mode
-
-A standalone script that captures images from a USB webcam and runs inference locally without the API server. Useful for continuous monitoring or demo purposes.
-
-- Captures frames at configurable intervals (default: 5 seconds)
-- Runs inference using the same MobileNetV2 model
-- Prints top-5 predictions with confidence scores
-- No API server required - direct model inference
-
 ## Setup Instructions
 
 ### Prerequisites
@@ -96,7 +125,7 @@ A standalone script that captures images from a USB webcam and runs inference lo
 
 ### Local Development (Mac/Linux)
 
-You can test the project locally before deploying to Raspberry Pi:
+If you want to try it locally before deploying to a Raspberry Pi:
 
 1. **Create virtual environment**
    ```bash
@@ -228,45 +257,3 @@ To run automatically on boot:
 - `CAMERA_INTERVAL` - Seconds between captures (default: 5)
 - `CAMERA_INDEX` - Camera device index (default: 0)
 
-## Design Decisions & Tradeoffs
-
-### Flask vs FastAPI
-**Chosen:** Flask  
-**Alternative:** FastAPI
-
-Flask is simpler and more mature. No async/await needed since inference is CPU-bound, not I/O-bound. FastAPI has better docs and modern features, but adds complexity we don't need for this scope.
-
-### Single Thread vs Multiprocessing
-**Chosen:** Single worker thread  
-**Alternative:** Multiprocessing pool
-
-Inference is CPU-bound on a single core anyway. The GIL doesn't hurt much since TensorFlow runs in C++. Single thread is simpler for state management and matches hardware constraints.
-
-### queue.Queue vs Redis
-**Chosen:** In-memory queue.Queue  
-**Alternative:** External queue (Redis)
-
-No external dependencies needed. Python's queue.Queue is thread-safe by default and sufficient for single-process demo. Trade persistence and distributed support for simplicity.
-
-### Immediate Rejection vs Blocking
-**Chosen:** Immediate 503 when queue full  
-**Alternative:** Block with timeout or return 202 Accepted
-
-Gives client more control to implement their own retry logic. Clearer failure mode. Prevents confusion from timeouts. More honest about capacity limits.
-
-### MobileNetV2 vs Larger Models
-**Chosen:** MobileNetV2  
-**Alternative:** ResNet, EfficientNet, custom model
-
-MobileNetV2 is designed for mobile/edge devices. Good accuracy/size tradeoff (~14MB). Well-supported in TensorFlow. Pre-trained on ImageNet for common use cases.
-
-## Future Improvements 
-
-- auth
-- rate limiting 
-- request persistence (queue is in-memory)
-- horizontal scaling or load balancing
-- GPU support
-- model versioning or updates
-- distributed tracing
-- multiple devices
