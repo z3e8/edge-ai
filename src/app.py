@@ -13,7 +13,7 @@ import time
 import uuid
 from flask import Flask, jsonify, request
 from PIL import Image
-from model import load_model, get_model
+from model import load_model, get_model, get_model_identity
 from preprocessing import preprocess_image
 from tensorflow.keras.applications.mobilenet_v2 import decode_predictions
 from logging_config import setup_logging
@@ -197,11 +197,14 @@ def get_metrics():
 def get_status():
     """status endpoint showing system info"""
     uptime = time.time() - startup_time
+    ident = get_model_identity()
     
     return jsonify({
         "device_id": DEVICE_ID,
         "edge_mode": EDGE_MODE,
         "model": "MobileNetV2",
+        "model_version": ident.get("model_version"),
+        "model_sha256": ident.get("model_sha256"),
         "queue_capacity": QUEUE_SIZE,
         "queue_current": request_queue.qsize(),
         "uptime_seconds": round(uptime, 2),
