@@ -29,6 +29,15 @@ HOST = os.getenv('HOST', '0.0.0.0')  # bind to all interfaces
 PORT = int(os.getenv('PORT', 5000))
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
+# mode + identity (standalone is default)
+EDGE_MODE = os.getenv("EDGE_MODE", "standalone").strip().lower()
+if EDGE_MODE not in ("standalone", "tier1"):
+    EDGE_MODE = "standalone"
+
+DEVICE_ID = os.getenv("DEVICE_ID", "dev-001").strip()
+if not DEVICE_ID:
+    DEVICE_ID = "dev-001"
+
 # setup logging with configured level
 logger = setup_logging(LOG_LEVEL)
 
@@ -190,6 +199,8 @@ def get_status():
     uptime = time.time() - startup_time
     
     return jsonify({
+        "device_id": DEVICE_ID,
+        "edge_mode": EDGE_MODE,
         "model": "MobileNetV2",
         "queue_capacity": QUEUE_SIZE,
         "queue_current": request_queue.qsize(),
