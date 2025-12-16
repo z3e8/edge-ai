@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime
 from flask import Flask, jsonify, request
 from PIL import Image
 from model import load_model, get_model, get_model_identity
@@ -136,6 +137,17 @@ def worker_thread():
                 "predictions": preds,
                 "latency_ms": round(latency_ms, 2)
             }
+
+            # tier1: send perf/overload signals out of band
+            telemetry.enqueue(
+                {
+                    "request_id": req_id,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "latency_ms": round(latency_ms, 2),
+                    "queue_depth": request_queue.qsize(),
+                    "http_status": 200,
+                }
+            )
             
             logger.info(f"completed request", extra={'request_id': req_id})
             
@@ -291,6 +303,15 @@ def infer():
         if request_queue.full():
             metrics['requests_rejected'] += 1
             logger.warning("queue full, rejecting request", extra={'request_id': req_id})
+            telemetry.enqueue(
+                {
+                    "request_id": req_id,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "latency_ms": None,
+                    "queue_depth": request_queue.qsize(),
+                    "http_status": 503,
+                }
+            )
             return jsonify({
                 "request_id": req_id,
                 "error": "service overloaded, queue is full. try again later."
@@ -312,6 +333,15 @@ def infer():
         # queue became full between check and put
         metrics['requests_rejected'] += 1
         logger.warning("queue full, rejecting request", extra={'request_id': req_id})
+        telemetry.enqueue(
+            {
+                "request_id": req_id,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "latency_ms": None,
+                "queue_depth": request_queue.qsize(),
+                "http_status": 503,
+            }
+        )
         return jsonify({
             "request_id": req_id,
             "error": "service overloaded, queue is full. try again later."
