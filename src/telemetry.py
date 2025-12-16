@@ -1,5 +1,7 @@
 """tiny telemetry sender for tier1 mode"""
 
+import json
+import os
 import queue
 import threading
 import time
@@ -22,6 +24,8 @@ class TelemetryClient:
         device_token: str | None,
         flush_interval_s: float,
         batch_size: int,
+        spool_dir: str | None,
+        spool_max_files: int,
         logger,
     ):
         self.enabled = enabled
@@ -32,6 +36,8 @@ class TelemetryClient:
         self.device_token = device_token
         self.flush_interval_s = flush_interval_s
         self.batch_size = batch_size
+        self.spool_dir = spool_dir.strip() if spool_dir else None
+        self.spool_max_files = max(0, int(spool_max_files))
         self.logger = logger
 
         self._q: queue.Queue = queue.Queue()
@@ -41,6 +47,13 @@ class TelemetryClient:
         self.send_failures = 0
 
         self._worker = threading.Thread(target=self._run, daemon=True)
+
+        if self.enabled and self.spool_dir:
+            try:
+                os.makedirs(self.spool_dir, exist_ok=True)
+            except Exception as e:
+                self.logger.warning(f"telemetry spool dir create failed: {e}")
+                self.spool_dir = None
 
     def start(self):
         if not self.enabled:
@@ -72,6 +85,7 @@ class TelemetryClient:
             "telemetry_backlog_events": self.backlog(),
             "telemetry_batches_sent": self.batches_sent,
             "telemetry_send_failures": self.send_failures,
+            "telemetry_spool_files": self._spool_count(),
         }
 
     def _make_payload(self, events: list[dict]) -> dict:
@@ -116,6 +130,86 @@ class TelemetryClient:
             )
             return False
 
+    def _spool_count(self) -> int:
+        if not self.enabled or not self.spool_dir:
+            return 0
+        try:
+            return len(self._list_spool_files())
+        except Exception:
+            return 0
+
+    def _list_spool_files(self) -> list[str]:
+        if not self.spool_dir:
+            return []
+        files = []
+        for name in os.listdir(self.spool_dir):
+            if name.endswith(".json"):
+                files.append(os.path.join(self.spool_dir, name))
+        files.sort()
+        return files
+
+    def _enforce_spool_cap(self):
+        if not self.spool_dir or self.spool_max_files <= 0:
+            return
+        try:
+            files = self._list_spool_files()
+            if len(files) <= self.spool_max_files:
+                return
+            extra = len(files) - self.spool_max_files
+            for path in files[:extra]:
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+            self.logger.warning(f"telemetry spool cap hit, dropped {extra} files")
+        except Exception:
+            # if this breaks, we still want inference to run
+            pass
+
+    def _spool_write(self, events: list[dict]):
+        if not self.spool_dir:
+            return
+        try:
+            ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+            fname = f"{ts}_{int(time.time() * 1000)}.json"
+            path = os.path.join(self.spool_dir, fname)
+            with open(path, "w") as f:
+                json.dump({"events": events}, f)
+            self._enforce_spool_cap()
+        except Exception as e:
+            self.logger.warning(f"telemetry spool write failed: {e}")
+
+    def _drain_spool_once(self) -> bool:
+        if not self.spool_dir:
+            return True
+        files = self._list_spool_files()
+        if not files:
+            return True
+
+        path = files[0]
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            events = data.get("events") if isinstance(data, dict) else None
+            if not isinstance(events, list):
+                os.remove(path)
+                return True
+        except Exception:
+            # corrupted file, just drop it
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+            return True
+
+        ok = self._send_batch(events)
+        if ok:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+        return ok
+
     def _drain_events(self) -> list[dict]:
         events: list[dict] = []
         try:
@@ -139,12 +233,29 @@ class TelemetryClient:
                 time.sleep(1)
                 continue
 
+            cp_ok = True
+            # drain old stuff first so ordering is roughly preserved
+            while self.spool_dir:
+                try:
+                    ok = self._drain_spool_once()
+                    if not ok:
+                        cp_ok = False
+                        break
+                except Exception:
+                    break
+                # only do one per loop unless we have backlog
+                if self._spool_count() == 0:
+                    break
+
             events = self._drain_events()
             if not events:
                 continue
 
+            if not cp_ok:
+                self._spool_write(events)
+                continue
+
             ok = self._send_batch(events)
             if not ok:
-                # for now we drop; commit 5 adds disk spool
-                pass
+                self._spool_write(events)
 

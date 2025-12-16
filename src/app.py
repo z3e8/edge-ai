@@ -46,6 +46,8 @@ TELEMETRY_PATH = os.getenv("TELEMETRY_PATH", "/telemetry").strip() or "/telemetr
 DEVICE_TOKEN = os.getenv("DEVICE_TOKEN", "").strip() or None
 TELEMETRY_FLUSH_INTERVAL_SECONDS = float(os.getenv("TELEMETRY_FLUSH_INTERVAL_SECONDS", "3"))
 TELEMETRY_BATCH_SIZE = int(os.getenv("TELEMETRY_BATCH_SIZE", "50"))
+TELEMETRY_SPOOL_DIR = os.getenv("TELEMETRY_SPOOL_DIR", "./ignored/telemetry-spool").strip()
+TELEMETRY_SPOOL_MAX_FILES = int(os.getenv("TELEMETRY_SPOOL_MAX_FILES", "500"))
 
 # setup logging with configured level
 logger = setup_logging(LOG_LEVEL)
@@ -89,6 +91,8 @@ telemetry = TelemetryClient(
     device_token=DEVICE_TOKEN,
     flush_interval_s=TELEMETRY_FLUSH_INTERVAL_SECONDS,
     batch_size=TELEMETRY_BATCH_SIZE,
+    spool_dir=TELEMETRY_SPOOL_DIR,
+    spool_max_files=TELEMETRY_SPOOL_MAX_FILES,
     logger=logger,
 )
 telemetry.start()
@@ -228,6 +232,7 @@ def get_metrics():
         "telemetry_batches_sent": telemetry.batches_sent,
         "telemetry_send_failures": telemetry.send_failures,
         "telemetry_backlog_events": telemetry.backlog(),
+        "telemetry_spool_files": telemetry.stats().get("telemetry_spool_files", 0),
     })
 
 @app.route('/status', methods=['GET'])
