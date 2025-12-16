@@ -15,6 +15,7 @@ from flask import Flask, jsonify, request
 from PIL import Image
 from model import load_model, get_model, get_model_identity
 from preprocessing import preprocess_image
+from telemetry import TelemetryClient
 from tensorflow.keras.applications.mobilenet_v2 import decode_predictions
 from logging_config import setup_logging
 
@@ -37,6 +38,13 @@ if EDGE_MODE not in ("standalone", "tier1"):
 DEVICE_ID = os.getenv("DEVICE_ID", "dev-001").strip()
 if not DEVICE_ID:
     DEVICE_ID = "dev-001"
+
+# tier1 telemetry config (used only when EDGE_MODE=tier1)
+CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://127.0.0.1:8000").strip()
+TELEMETRY_PATH = os.getenv("TELEMETRY_PATH", "/telemetry").strip() or "/telemetry"
+DEVICE_TOKEN = os.getenv("DEVICE_TOKEN", "").strip() or None
+TELEMETRY_FLUSH_INTERVAL_SECONDS = float(os.getenv("TELEMETRY_FLUSH_INTERVAL_SECONDS", "3"))
+TELEMETRY_BATCH_SIZE = int(os.getenv("TELEMETRY_BATCH_SIZE", "50"))
 
 # setup logging with configured level
 logger = setup_logging(LOG_LEVEL)
@@ -69,6 +77,20 @@ try:
 except Exception as e:
     logger.error(f"error loading model, exiting: {e}")
     exit(1)
+
+# start telemetry in tier1 mode (runs out of band)
+telemetry = TelemetryClient(
+    enabled=(EDGE_MODE == "tier1"),
+    device_id=DEVICE_ID,
+    identity_provider=get_model_identity,
+    control_plane_url=CONTROL_PLANE_URL,
+    telemetry_path=TELEMETRY_PATH,
+    device_token=DEVICE_TOKEN,
+    flush_interval_s=TELEMETRY_FLUSH_INTERVAL_SECONDS,
+    batch_size=TELEMETRY_BATCH_SIZE,
+    logger=logger,
+)
+telemetry.start()
 
 def worker_thread():
     """
@@ -190,7 +212,10 @@ def get_metrics():
         "total_requests": metrics['total_requests'],
         "requests_rejected": metrics['requests_rejected'],
         "average_latency_ms": round(avg_latency, 2),
-        "current_queue_depth": request_queue.qsize()
+        "current_queue_depth": request_queue.qsize(),
+        "telemetry_batches_sent": telemetry.batches_sent,
+        "telemetry_send_failures": telemetry.send_failures,
+        "telemetry_backlog_events": telemetry.backlog(),
     })
 
 @app.route('/status', methods=['GET'])
@@ -205,6 +230,7 @@ def get_status():
         "model": "MobileNetV2",
         "model_version": ident.get("model_version"),
         "model_sha256": ident.get("model_sha256"),
+        "telemetry_enabled": bool(telemetry.enabled),
         "queue_capacity": QUEUE_SIZE,
         "queue_current": request_queue.qsize(),
         "uptime_seconds": round(uptime, 2),
