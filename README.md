@@ -1,93 +1,58 @@
 # Edge AI Inference on Raspberry Pi
-Tiny Flask API that runs MobileNetV2 image classification on-device, with a bounded queue + “fail fast” overload behavior.
+Tiny Flask service for on-device image classification w/ a bounded queue + fail-fast overload.
 
-## Overview 
-I use a MobileNetV2 model for image classification on a Raspberry Pi, exposed as a small REST API for inference requests. It includes request queueing with backpressure, structured logging, and it fails fast under load instead of slowing everything down.
+## Description
+This is a small edge inference server I run on a Pi. It takes a base64 image, runs MobileNetV2, and returns top-5 predictions. Main thing I cared about was making overload behavior obvious (bounded queue + 503 instead of slow timeouts).
 
-I built this to get a feel for what “production-style” ML inference looks like on constrained edge hardware (not just running a model in a notebook). The goal was to understand backpressure, latency tradeoffs, and the failure modes you hit when inference can’t keep up with incoming requests.
-
-I intentionally kept it to a single worker and a bounded queue so overload behavior stays explicit and observable.
+Also has an optional `EDGE_MODE=tier1` that exports telemetry batches to a local “control plane” receiver. It’s still the same inference path, just extra ops-ish signals.
 
 ## Live Demo Link & Screenshots
-(to be added later)
+TODO
 
 ## Tech Stack
-- Python 3.9+
-- Flask
-- TensorFlow (MobileNetV2)
-- Pillow + numpy
-- (optional) OpenCV for webcam mode
+- Python 3.9–3.11 (tensorflow 2.15)
+- Flask + requests
+- TensorFlow (MobileNetV2), Pillow, numpy
 
-## Key Features
-- POST `/infer` takes a base64 image and returns top-5 predictions + latency
-- Bounded FIFO queue (`QUEUE_SIZE`, default 10). If full -> **503** right away
-- Single worker thread (so behavior is predictable on the Pi)
-- `/health`, `/status`, `/metrics` endpoints for basic introspection
-- Structured-ish logging + request IDs (good enough for a demo)
-- Webcam mode that runs local inference every N seconds
+## Features
+- `POST /infer` returns top-5 + latency
+- bounded FIFO queue (`QUEUE_SIZE`, default 10). queue full → 503 right away
+- single worker thread (simple + predictable)
+- `/health`, `/status`, `/metrics`
+- tier1 mode: telemetry batches + disk spool if control plane is down
 
 ## Setup
+
 ```bash
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-python3 src/app.py   # default http://localhost:5000
+python3 src/app.py
+python3 tests/demo.py
 ```
-Try it:
-- `GET /health`
-- `POST /infer` with JSON: `{"image": "<base64>"}` (see `tests/demo.py`)
-Webcam mode:
+
+Tier1 local demo (starts fake control plane + edge + runs demo + load burst):
+
 ```bash
-pip install opencv-python
-CAMERA_INTERVAL=5 python3 src/webcam_inference.py
+./scripts/demo_tier1.sh
 ```
 
-## Architecture 
-Basically: API enqueues work, worker does preprocess + model.predict, API waits for result. Queue is bounded so overload is obvious.
-```
-client -> Flask (/infer) -> bounded Queue -> worker thread -> MobileNetV2 -> result
-              |-> /health /metrics /status
-```
+## Architecture
 
-## Diagram
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Client Applications                     │
-└────────────────────────────┬────────────────────────────────┘
-                             │ HTTP/REST
-                             ▼
-┌────────────────────────────────────────────────────────────┐
-│                      Flask API Server                      │
-│  ┌──────────────────────┐      ┌──────────────────────┐    │
-│  │   Data Plane         │      │   Control Plane      │    │
-│  │   /infer (POST)      │      │   /health (GET)      │    │
-│  │                      │      │   /metrics (GET)     │    │
-│  │                      │      │   /status (GET)      │    │
-│  └──────────┬───────────┘      └──────────────────────┘    │
-└─────────────┼──────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Request Queue (FIFO)                     │
-│              (Bounded, In-Memory, Thread-Safe)              │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Worker Thread                          │
-│  1. Dequeue request                                         │
-│  2. Preprocess image (resize to 224x224)                    │
-│  3. Run inference (MobileNetV2)                             │
-│  4. Return top-5 predictions                                │
-│  5. Update metrics                                          │
-└─────────────────────────────────────────────────────────────┘
+```text
+client -> Flask (/infer) -> bounded queue -> worker -> model -> response
+              |-> /health /status /metrics
+              |-> telemetry sender thread (tier1 only)
 ```
 
 ## Future Improvements
-- switch base64 uploads to multipart to cut overhead
-- auth (even basic token) for `/infer`
-- compare 1 worker vs small worker pool (throughput vs tail latency)
-- better metrics (thread-safe, histograms, etc)
+- switch base64 to multipart uploads
+- better metrics (percentiles, not just averages)
+- a safer model swap flow (right now it’s restart-based)
 
-## Credits 
-Designed and built by Zane Hensley. 
+## Challenges and What I Learned
+- bounded queues are nice because failure is explicit. it’s way easier to debug “503, queue full” than random long tail latency.
+- telemetry can’t be on the request path. even “just one post” can hang your service if the network is weird.
+- disk spooling is a cheap way to make edge stuff feel real. but you need a cap or you’ll fill storage.
+
+## Credits
+solo project built by Zane Hensley
