@@ -1,13 +1,12 @@
 # Edge AI Inference on Raspberry Pi
-Tiny Flask service for on-device image classification w/ a bounded queue + fail-fast overload.
+Tiny Flask service for on-device image classification with a bounded queue + fail-fast overload.
 
 ## Description
 This is a small edge inference server I run on a Pi. It takes a base64 image, runs MobileNetV2, and returns top-5 predictions. Main thing I cared about was making overload behavior obvious (bounded queue + 503 instead of slow timeouts).
 
-Also has an optional `EDGE_MODE=tier1` that exports telemetry batches to a local “control plane” receiver. It’s still the same inference path, just extra ops-ish signals.
+Also has an optional `EDGE_MODE=tier1` that exports telemetry batches to a local “control plane” receiver. 
 
 ## Live Demo Link & Screenshots
-TODO
 
 ## Tech Stack
 - Python 3.9–3.11 (tensorflow 2.15)
